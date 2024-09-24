@@ -27,6 +27,9 @@ blueWrap = BlueTableWrapper(env, output_mode='vector')
 #        --- buffer storing the correct content?
 #        --- buffer size too big? (maybe pop() function is not being utilized enough)
 #     --- frequency of updating the target network (maybe more frequent?)
+#     --- the reward after Impact Op_Server0?
+#        --- FOUND! The current reward display I have in the loop doesn't add together the total reward
+#        --- But!! The reward and the content within the experience is correct
 
 
 
@@ -275,6 +278,8 @@ class ReplayBuffer:
     def add(self, experience):
        if len(self.buffer) >= self.max_size:
             self.buffer.pop(0)
+
+       print("This is the experience: ", experience)
        self.buffer.append(experience)
 
     def sample(self, batch_size):
@@ -282,6 +287,8 @@ class ReplayBuffer:
        return [self.buffer[i] for i in indices]
 
 def pick_action(state, model, epsilon):
+    #print("Greedy value!!!!!!!!1: ", epsilon)
+
     if np.random.rand() < epsilon:
        return np.random.randint(0, 144)
 
@@ -325,7 +332,6 @@ def training_Loop(env, model, target_model, replay_buffer, total_reward, num_epi
       #  #print("HELLO THIS IS STATE EH: ", blue_observation)
 
        done = False
-
        while not done:
            #print(bit_vector)
            state = bit_vector
