@@ -11,58 +11,56 @@ import random
 import tensorflow as tf
 from tensorflow.keras import layers, models
 from pprint import pprint
+from torch.utils.tensorboard import SummaryWriter
+
+writer = SummaryWriter('runs/dqn_qvalue_tracking')
 
 path = str(inspect.getfile(CybORG))
 path = path[:-10] + '/Shared/Scenarios/Scenario2.yaml'
-env = CybORG(path, 'sim', agents={'Red':B_lineAgent})
+env = CybORG(path, 'sim', agents={'Red':RedMeanderAgent})
 blueWrap = BlueTableWrapper(env, output_mode='vector')
-
 
 # --- limit the action space for specific scenarios
 # --- potential solutions for learning
 #     --- state representation of 52 bit vector causing the issue
 #     --- epsilon decay, instead of having a fixed epsilon value of 0.5
+#          --- gonna use decay instead
 #     --- learning rate too high maybe?
+#          --- this needs to be played around with
+#          --- gonna use 0.001 for now 
 #     --- replay buffer
 #        --- buffer storing the correct content?
 #        --- buffer size too big? (maybe pop() function is not being utilized enough)
+#           --- changing the buffer size to 50 and batch size to 10 to reduce memory usage and recent experience update
 #     --- frequency of updating the target network (maybe more frequent?)
+#        --- change it to every 2 episodes
 #     --- the reward after Impact Op_Server0?
 #        --- FOUND! The current reward display I have in the loop doesn't add together the total reward
 #        --- But!! The reward and the content within the experience is correct
 
 
 
+#rate of new information overrides old information || Alpha
+#before it was 0.5, trying out 0.001 to lower the learning rate
+learning_rate = 0.001
 
-def set_host_status(bit_vector, obs=None):
-   if obs is None or len(obs) == 0:
-      print(bin(bit_vector))
-      return bit_vector
-   
-   bit_string = ''.join(map(str, obs))
-   bit_vector = int(bit_string,2)
+#short-sighted / long-sighted decision making factor || Gamma
+discount_factor = 0.5  
 
-   #print(bin(bit_vector))
-   return bit_vector
+#exploration / exploitation
+#used to be 0.5, now epsilon decay with 0.01 min and 0.995 decay factor and using initial value of 1.0
+epsilon = 1.0 
+decay = 0.9995
+minimum = 0.01
 
-def get_reward():
-    reward = blueWrap.get_rewards()
-    total_reward = float(reward["Blue"])
-    print("Total reward: ", total_reward)
-    return total_reward
-
-learning_rate = 0.5      #rate of new information overrides old information || Alpha
-discount_factor = 0.5    #short-sighted / long-sighted decision making factor || Gamma
-epsilon = 0.5            #exploration / exploitation
-
-def step(action, env, results, bit_vector):
-    if action in (0, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120, 132):
+def step(action):
+   if action in (0, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120, 132):
        blueObs=blueWrap.step(action=Sleep(), agent ='Blue')
 
-    elif action in (1, 13, 25, 37, 49, 61, 73, 85, 97, 109, 121, 133):
+   elif action in (1, 13, 25, 37, 49, 61, 73, 85, 97, 109, 121, 133):
        blueObs=blueWrap.step(action=Monitor(session=0, agent='Blue'), agent='Blue')
 
-    elif action in (2, 14, 26, 38, 50, 62, 74, 86, 98, 110, 122, 134):
+   elif action in (2, 14, 26, 38, 50, 62, 74, 86, 98, 110, 122, 134):
        analyseMapping = {
           2: "User0",
           14: "User1",
@@ -81,7 +79,7 @@ def step(action, env, results, bit_vector):
        hostname = analyseMapping.get(action)
        blueObs=blueWrap.step(action=Analyse(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (3, 15, 27, 39, 51, 63, 75, 87, 99, 111, 123, 135):
+   elif action in (3, 15, 27, 39, 51, 63, 75, 87, 99, 111, 123, 135):
        apacheMapping = {
           3: "User0",
           15: "User1",
@@ -100,7 +98,7 @@ def step(action, env, results, bit_vector):
        hostname = apacheMapping.get(action)
        blueObs=blueWrap.step(action=DecoyApache(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (4, 16, 28, 40, 52, 64, 76, 88, 100, 112, 124, 136):
+   elif action in (4, 16, 28, 40, 52, 64, 76, 88, 100, 112, 124, 136):
        femitterMapping = {
           4: "User0",
           16: "User1",
@@ -119,7 +117,7 @@ def step(action, env, results, bit_vector):
        hostname = femitterMapping.get(action)
        blueObs=blueWrap.step(action=DecoyFemitter(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (5, 17, 29, 41, 53, 65, 77, 89, 101, 113, 125, 137):
+   elif action in (5, 17, 29, 41, 53, 65, 77, 89, 101, 113, 125, 137):
        harakaSMPTMapping = {
           5: "User0",
           17: "User1",
@@ -138,7 +136,7 @@ def step(action, env, results, bit_vector):
        hostname = harakaSMPTMapping.get(action)
        blueObs=blueWrap.step(action=DecoyHarakaSMPT(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (6, 18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138):
+   elif action in (6, 18, 30, 42, 54, 66, 78, 90, 102, 114, 126, 138):
        smssMapping = {
           6: "User0",
           18: "User1",
@@ -157,7 +155,7 @@ def step(action, env, results, bit_vector):
        hostname = smssMapping.get(action)
        blueObs=blueWrap.step(action=DecoySmss(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (7, 19, 31, 43, 55, 67, 79, 91, 103, 115, 127, 139):
+   elif action in (7, 19, 31, 43, 55, 67, 79, 91, 103, 115, 127, 139):
        sshdMapping = {
           7: "User0",
           19: "User1",
@@ -176,7 +174,7 @@ def step(action, env, results, bit_vector):
        hostname = sshdMapping.get(action)
        blueObs=blueWrap.step(action=DecoySSHD(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (8, 20, 32, 44, 56, 68, 80, 92, 104, 116, 128, 140):
+   elif action in (8, 20, 32, 44, 56, 68, 80, 92, 104, 116, 128, 140):
        svchostMapping = {
           8: "User0",
           20: "User1",
@@ -195,7 +193,7 @@ def step(action, env, results, bit_vector):
        hostname = svchostMapping.get(action)
        blueObs=blueWrap.step(action=DecoySvchost(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (9, 21, 33, 45, 57, 69, 81, 93, 105, 117, 129, 141):
+   elif action in (9, 21, 33, 45, 57, 69, 81, 93, 105, 117, 129, 141):
        tomcatMapping = {
           9: "User0",
           21: "User1",
@@ -214,7 +212,7 @@ def step(action, env, results, bit_vector):
        hostname = tomcatMapping.get(action)
        blueObs=blueWrap.step(action=DecoyTomcat(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (10, 22, 34, 46, 58, 70, 82, 94, 106, 118, 130, 142):
+   elif action in (10, 22, 34, 46, 58, 70, 82, 94, 106, 118, 130, 142):
        removeMapping = {
           10: "User0",
           22: "User1",
@@ -233,7 +231,7 @@ def step(action, env, results, bit_vector):
        hostname = removeMapping.get(action)
        blueObs=blueWrap.step(action=Remove(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    elif action in (11, 23, 35, 47, 59, 71, 83, 95, 107, 119, 131, 143):
+   elif action in (11, 23, 35, 47, 59, 71, 83, 95, 107, 119, 131, 143):
        restoreMapping = {
           11: "User0",
           23: "User1",
@@ -252,15 +250,15 @@ def step(action, env, results, bit_vector):
        hostname = restoreMapping.get(action)
        blueObs=blueWrap.step(action=Restore(session=0, agent='Blue', hostname=hostname), agent='Blue')
 
-    print("Blue Action: ", blueWrap.get_last_action('Blue'))
+   print("Blue Action: ", blueWrap.get_last_action('Blue'))
 
-    print("Red Action: ", blueWrap.get_last_action('Red'))
+   print("Red Action: ", blueWrap.get_last_action('Red'))
 
-    done = True
+   done = True
 
-    next_state = blueObs.observation
-    #print('HELLOO THIS IS NEXT STATE',next_state)
-    return next_state, done, blueObs
+   next_state = blueObs.observation
+   print('HELLOO THIS IS NEXT STATE',next_state)
+   return next_state, done, blueObs
 
 def create_DQN(input_shape, actions):
     model = models.Sequential()
@@ -286,16 +284,22 @@ class ReplayBuffer:
        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
        return [self.buffer[i] for i in indices]
 
-def pick_action(state, model, epsilon):
-    #print("Greedy value!!!!!!!!1: ", epsilon)
-
+def pick_action(state, model, epsilon, writer, episode):
     if np.random.rand() < epsilon:
        return np.random.randint(0, 144)
 
     else:
-       state_vector = np.array([int(bit) for bit in bin(state)[2:].zfill(56)], dtype=np.float32)
-       #print(state_vector)
-       q_values = model.predict(state_vector.reshape(1,-1))
+       state_list = np.array(state, dtype=np.float32)
+       print(state_list)
+
+       if len(state_list) < 56:
+            state_list = np.pad(state_list, (0, 56 - len(state_list)), mode='constant')
+
+       q_values = model.predict(state_list.reshape(1,-1))
+
+       for action_index in range(q_values.shape[1]):
+            writer.add_scalar(f'Q-values/action_{action_index}', q_values[0][action_index], episode)
+
        return np.argmax(q_values)
 
 def train_DQN(model, target_model, replay_buffer, batch_size):
@@ -305,51 +309,57 @@ def train_DQN(model, target_model, replay_buffer, batch_size):
     minibatch = replay_buffer.sample(batch_size)
 
     for state, action, reward, next_state, done in minibatch:
-       binary = format(state, '056b')
-       binary_vector = np.array([int(bit) for bit in binary])
+       state_list = np.array(state)
 
-       target_q = model.predict(binary_vector.reshape(1, 56))[0]
+       if len(state_list) < 56:
+            state_list = np.pad(state_list, (0, 56 - len(state_list)), mode='constant')
+
+       target_q = model.predict(state_list.reshape(1, 56))[0]
 
        if done:
            target_q[action] = reward
        else:
-           next_binary = format(next_state, '056b')
-           next_binary_vector = np.array([int(bit) for bit in next_binary])
-
-           next_q_values = target_model.predict(next_binary_vector.reshape(1, 56))[0]
+           next_state_list = np.array(next_state)
+           next_q_values = target_model.predict(next_state_list.reshape(1, 56))[0]
            target_q[action] = reward + discount_factor * np.max(next_q_values)
 
-       model.fit(binary_vector.reshape(1, 56), target_q[np.newaxis], epochs=1, verbose=0)
+       model.fit(state_list.reshape(1, 56), target_q[np.newaxis], epochs=1, verbose=0)
+       #backwards propagation
 
-def training_Loop(env, model, target_model, replay_buffer, total_reward, num_episodes, results):
-    bit_vector = 0
-    bit_vector = set_host_status(bit_vector)
+
+def training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num_episodes, results):
+    state = [0] * 56
 
     for episode in range(num_episodes):
-       
-      #  results = blueWrap.step(agent='Blue')
-      #  blue_observation = results.observation
-      #  #print("HELLO THIS IS STATE EH: ", blue_observation)
-
        done = False
+
        while not done:
-           #print(bit_vector)
-           state = bit_vector
-           action = pick_action(state, model, epsilon)
 
-           next_state, done, results = step(action, env, results, bit_vector)
-           total_reward += get_reward()
+           action = pick_action(state, model, epsilon, writer, episode)
+           print("This is the current state: ", state)
 
-           replay_buffer.add((state, action, total_reward, next_state, done))
-           train_DQN(model, target_model, replay_buffer, batch_size=32)
-           bit_vector = 0
-           bit_vector = set_host_status(bit_vector, next_state)
+           next_state, done, results = step(action)
 
-       if episode % 10 ==0:
+           reward = results.reward
+
+           total_reward += reward
+
+           print("This is the total reward: ", total_reward)
+           print("This is the reward per round: ", reward)
+
+           replay_buffer.add((state, action, reward, next_state, done))
+           train_DQN(model, target_model, replay_buffer, batch_size=10)
+           state = next_state
+
+       if episode % 2 ==0:
            target_model.set_weights(model.get_weights())
 
+       epsilon = max(minimum, epsilon * decay)
+       print("This is the epsilon: ", epsilon)
        print("WHILE LOOP DONEEEEEEEEEEEEEEEEE", episode)
        print("\n\n")
+    
+    writer.close()
 
 input_shape = 56
 num_actions = 144
@@ -361,6 +371,8 @@ model = create_DQN(input_shape, num_actions)
 target_model = create_DQN(input_shape, num_actions)
 target_model.set_weights(model.get_weights())
 
-replay_buffer = ReplayBuffer(max_size=500000)
+replay_buffer = ReplayBuffer(max_size=50)
 
-training_Loop(env, model, target_model, replay_buffer, total_reward, num_episodes=1000, results=results)
+training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num_episodes=900, results=results)
+
+# tensorboard --logdir=runs/dqn_qvalue_tracking
