@@ -1,5 +1,5 @@
 import sys
-sys.path.append('/home/ubuntu/Downloads/cage-challenge-2/CybORG')
+sys.path.append('/home/jasonhuo/cage-challenge-2/CybORG')
 import inspect
 from CybORG import CybORG
 from CybORG.Agents import *
@@ -27,7 +27,7 @@ blueWrap = BlueTableWrapper(env, output_mode='vector')
 #          --- gonna use decay instead
 #     --- learning rate too high maybe?
 #          --- this needs to be played around with
-#          --- gonna use 0.001 for now 
+#          --- gonna use 0.001 for now
 #     --- replay buffer
 #        --- buffer storing the correct content?
 #        --- buffer size too big? (maybe pop() function is not being utilized enough)
@@ -45,12 +45,12 @@ blueWrap = BlueTableWrapper(env, output_mode='vector')
 learning_rate = 0.001
 
 #short-sighted / long-sighted decision making factor || Gamma
-discount_factor = 0.5  
+discount_factor = 0.9
 
 #exploration / exploitation
 #used to be 0.5, now epsilon decay with 0.01 min and 0.995 decay factor and using initial value of 1.0
-epsilon = 1.0 
-decay = 0.9995
+epsilon = 1.0
+decay = 0.995
 minimum = 0.01
 
 def step(action):
@@ -323,7 +323,7 @@ def train_DQN(model, target_model, replay_buffer, batch_size):
            next_q_values = target_model.predict(next_state_list.reshape(1, 56))[0]
            target_q[action] = reward + discount_factor * np.max(next_q_values)
 
-       model.fit(state_list.reshape(1, 56), target_q[np.newaxis], epochs=1, verbose=0)
+       model.fit(state_list.reshape(1, 56), target_q[np.newaxis], epochs=5, verbose=0)
        #backwards propagation
 
 
@@ -348,7 +348,7 @@ def training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num
            print("This is the reward per round: ", reward)
 
            replay_buffer.add((state, action, reward, next_state, done))
-           train_DQN(model, target_model, replay_buffer, batch_size=10)
+           train_DQN(model, target_model, replay_buffer, batch_size=35)
            state = next_state
 
        if episode % 2 ==0:
@@ -358,7 +358,7 @@ def training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num
        print("This is the epsilon: ", epsilon)
        print("WHILE LOOP DONEEEEEEEEEEEEEEEEE", episode)
        print("\n\n")
-    
+
     writer.close()
 
 input_shape = 56
@@ -371,8 +371,8 @@ model = create_DQN(input_shape, num_actions)
 target_model = create_DQN(input_shape, num_actions)
 target_model.set_weights(model.get_weights())
 
-replay_buffer = ReplayBuffer(max_size=50)
+replay_buffer = ReplayBuffer(max_size=1000)
 
-training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num_episodes=900, results=results)
+training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num_episodes=50000, results=results)
 
 # tensorboard --logdir=runs/dqn_qvalue_tracking
