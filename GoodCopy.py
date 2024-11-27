@@ -13,11 +13,11 @@ from tensorflow.keras import layers, models
 from pprint import pprint
 from torch.utils.tensorboard import SummaryWriter
 
-writer = SummaryWriter('runs/dqn_qvalue_tracking')
+writer = SummaryWriter('runs/total_reward_tracking')
 
 path = str(inspect.getfile(CybORG))
 path = path[:-10] + '/Shared/Scenarios/Scenario2.yaml'
-env = CybORG(path, 'sim', agents={'Red':RedMeanderAgent})
+env = CybORG(path, 'sim', agents={'Red':B_lineAgent})
 blueWrap = BlueTableWrapper(env, output_mode='vector')
 
 # --- limit the action space for specific scenarios
@@ -254,11 +254,11 @@ def step(action):
 
    print("Red Action: ", blueWrap.get_last_action('Red'))
 
-   done = True
+   done = False
 
    next_state = blueObs.observation
    print('HELLOO THIS IS NEXT STATE',next_state)
-   return next_state, done, blueObs
+   return next_state, done, blueObs  
 
 def create_DQN(input_shape, actions):
     model = models.Sequential()
@@ -284,7 +284,7 @@ class ReplayBuffer:
        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
        return [self.buffer[i] for i in indices]
 
-def pick_action(state, model, epsilon, writer, episode):
+def pick_action(state, model, epsilon, episode):
     if np.random.rand() < epsilon:
        return np.random.randint(0, 144)
 
@@ -292,13 +292,10 @@ def pick_action(state, model, epsilon, writer, episode):
        state_list = np.array(state, dtype=np.float32)
        print(state_list)
 
-       if len(state_list) < 56:
-            state_list = np.pad(state_list, (0, 56 - len(state_list)), mode='constant')
+       if len(state_list) < input_shape:
+            state_list = np.pad(state_list, (0, input_shape - len(state_list)), mode='constant')
 
        q_values = model.predict(state_list.reshape(1,-1))
-
-       for action_index in range(q_values.shape[1]):
-            writer.add_scalar(f'Q-values/action_{action_index}', q_values[0][action_index], episode)
 
        return np.argmax(q_values)
 
@@ -311,61 +308,64 @@ def train_DQN(model, target_model, replay_buffer, batch_size):
     for state, action, reward, next_state, done in minibatch:
        state_list = np.array(state)
 
-       if len(state_list) < 56:
-            state_list = np.pad(state_list, (0, 56 - len(state_list)), mode='constant')
+       if len(state_list) < input_shape:
+            state_list = np.pad(state_list, (0, input_shape - len(state_list)), mode='constant')
 
-       target_q = model.predict(state_list.reshape(1, 56))[0]
+       target_q = model.predict(state_list.reshape(1, input_shape))[0]
 
        if done:
            target_q[action] = reward
        else:
            next_state_list = np.array(next_state)
-           next_q_values = target_model.predict(next_state_list.reshape(1, 56))[0]
+           next_q_values = target_model.predict(next_state_list.reshape(1, input_shape))[0]
            target_q[action] = reward + discount_factor * np.max(next_q_values)
 
-       model.fit(state_list.reshape(1, 56), target_q[np.newaxis], epochs=5, verbose=0)
+       model.fit(state_list.reshape(1, input_shape), target_q[np.newaxis], epochs=5, verbose=0)
        #backwards propagation
 
 
-def training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num_episodes, results):
-    state = [0] * 56
-
+def training_Loop(epsilon, model, target_model, replay_buffer, num_episodes, steps_per_episode):
     for episode in range(num_episodes):
-       done = False
+        results = blueWrap.reset('Blue')
+        state = [0] * input_shape
+        total_reward = 0.0
+        done = False
 
-       while not done:
+        for steps in range(steps_per_episode):
 
-           action = pick_action(state, model, epsilon, writer, episode)
-           print("This is the current state: ", state)
+            action = pick_action(state, model, epsilon, episode)
+            next_state, done, results = step(action)
 
-           next_state, done, results = step(action)
+            reward = results.reward
+            total_reward += reward
+            print("This is the reward: ", total_reward)
 
-           reward = results.reward
+            replay_buffer.add((state, action, reward, next_state, done))
 
-           total_reward += reward
+            train_DQN(model, target_model, replay_buffer, batch_size=35)
 
-           print("This is the total reward: ", total_reward)
-           print("This is the reward per round: ", reward)
+            state = next_state
+            
+            if done:
+                break
 
-           replay_buffer.add((state, action, reward, next_state, done))
-           train_DQN(model, target_model, replay_buffer, batch_size=35)
-           state = next_state
+        done = True
 
-       if episode % 2 ==0:
-           target_model.set_weights(model.get_weights())
+        if episode % 10 == 0:
+            target_model.set_weights(model.get_weights())
 
-       epsilon = max(minimum, epsilon * decay)
-       print("This is the epsilon: ", epsilon)
-       print("WHILE LOOP DONEEEEEEEEEEEEEEEEE", episode)
-       print("\n\n")
+        epsilon = max(minimum, epsilon * decay)
+
+        #average_reward = total_reward / steps_per_episode
+        writer.add_scalar('Total Reward per Episode', total_reward, episode)
+
+        print(f"Episode {episode+1}/{num_episodes} - Total Reward: {total_reward}, Epsilon: {epsilon}")
 
     writer.close()
 
-input_shape = 56
+input_shape = 52
 num_actions = 144
 total_reward = 0.0
-
-results = blueWrap.reset('Blue')
 
 model = create_DQN(input_shape, num_actions)
 target_model = create_DQN(input_shape, num_actions)
@@ -373,6 +373,18 @@ target_model.set_weights(model.get_weights())
 
 replay_buffer = ReplayBuffer(max_size=1000)
 
-training_Loop(epsilon, model, target_model, replay_buffer, total_reward, num_episodes=50000, results=results)
+training_Loop(epsilon, model, target_model, replay_buffer, num_episodes=7000, steps_per_episode=50)
 
-# tensorboard --logdir=runs/dqn_qvalue_tracking
+# source /home/jasonhuo/CybORG-CAGE-2-J-C/venv/bin/activate
+# tensorboard --logdir=runs/total_reward_tracking
+
+# nohup python3 GoodCopy.py &
+# ps -ef | grep GoodCopy.py
+# tensorboard --logdir=C:/Users/qqcom/Downloads/total_reward_tracking
+# tensorboard --logdir=C:/Users/Jason/Downloads/Total_Reward
+# python -m tensorboard.main --logdir=C:/Users/Jason/Downloads/Total_Reward
+
+# scp jasonhuo@134.117.214.176:/home/jasonhuo/CybORG-CAGE-2-J-C/runs/total_reward_tracking/ C:/Users/qqcom/Downloads/total_reward_tracking
+
+# scp jasonhuo@134.117.214.176:/home/jasonhuo/CybORG-CAGE-2-J-C/runs/total_reward_tracking/events.out.tfevents.1731984380.sci-jgoa.3370632.0 C:/Users/Jason/Downloads/Total_Reward
+# try with personal computer since the Intel Xeon processor is too slow
